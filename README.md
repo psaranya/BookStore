@@ -19,3 +19,11 @@ This project is a code kata that involves creating a Simple Online Bookstore. Th
    git clone <backend-repo-url>
    cd <backend-directory>
 
+API Endpoints:
+GET /api/books: Retrieve the list of books.
+POST /api/cart/add: Add a book to the shopping cart.
+GET /api/cart/{userId}: Retrieve the user's shopping cart.
+DELETE /api/cart/remove/{userId}/{itemId}: Remove an item from the cart.
+POST /api/checkout/{userId}: Checkout the cart 
+POST /api/auth/register : User Registration
+POST /api/auth/login: User Login
