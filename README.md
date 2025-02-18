@@ -27,3 +27,21 @@ DELETE /api/cart/remove/{userId}/{itemId}: Remove an item from the cart.
 POST /api/checkout/{userId}: Checkout the cart 
 POST /api/auth/register : User Registration
 POST /api/auth/login: User Login
+
+validates the parameters receives: 
+
+CashStockId must exist.  
+
+CashStockStatusName of the CashStockId provided must be “CLOSE”. 
+
+CashUnitId provided must exist. 
+
+Total amount of the list of Cash Unit Stock is corresponding with the CashStockOperationAmount. Example 2 notes of 50€ must have a CashStockOperationAmount = 100€. 
+
+CashStockOperationAmount is the same as the amount registered in the Cash Stock. 
+
+The list of Cash Unit Stock provided must contain the same Cash Unit registered in the last Cash Stock Session and the stage of the Cash Unit Stock. 
+
+Employee data provided must match with the SAML. 
+
+Branch (UnitRobiId) of the Cash Stock provided must match with the SAML
