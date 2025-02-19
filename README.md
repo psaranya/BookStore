@@ -65,4 +65,52 @@ The list of Cash Unit Stock provided must contain the same Cash Unit registered 
 
 Employee data provided must match with the SAML. 
 
+@Service
+public class ValidationService {
+
+    private boolean validateOpenCashStock(CashStocksActivateContextRequest request) {
+        CashStock cashStock = getCashStock(Integer.parseInt(request.getCashStockId()));
+
+        Integer totalQuantity = request.getCashUnitStockContextList().stream().mapToInt(CashUnitStockContext ::getCashUnitStockQuantity).sum();
+        List<CashUnit> cashUnitList = request.getCashUnitStockContextList().stream().map(src -> {
+            return getCashUnit(Integer.parseInt(src.getCashUnitId()));
+        }).collect(Collectors.toList());
+
+        if(cashStock == null && cashUnitList.isEmpty()) {
+            return false;
+        }
+        CashStockSession cashStockSession = getCashStockSession(Integer.parseInt(cashStock.getCashStockLastSessionId()));
+
+        if(!cashStock.getCashStockStatusName().equals("CLOSE") && !cashStock.getCashStockAmount().equals(totalQuantity)) {
+            return false;
+        }
+
+        return true;
+
+    }
+
+    public CashStock getCashStock(Integer cashStockId) {
+        CashStock cashStock = new CashStock();
+        cashStock.setCashStockId(cashStockId);
+        cashStock.setCashStockStatusName("CLOSE");
+        cashStock.setCashStockAmount(100);
+        return cashStock;
+    }
+
+    public CashUnit getCashUnit(Integer cashUnitId) {
+        CashUnit cashUnit = new CashUnit();
+        cashUnit.setCashUnitId(cashUnitId);
+        return cashUnit;
+    }
+
+    public CashStockSession getCashStockSession(Integer cashStockSessionId) {
+        CashStockSession cashStockSession = new CashStockSession();
+        cashStockSession.setCashStockSessionId(cashStockSessionId);
+        cashStockSession.setCashStockSessionStatusName("CLOSE");
+        return cashStockSession;
+    }
+
+}
+
+
 Branch (UnitRobiId) of the Cash Stock provided must match with the SAML
