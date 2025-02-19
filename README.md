@@ -40,6 +40,27 @@ Total amount of the list of Cash Unit Stock is corresponding with the CashStockO
 
 CashStockOperationAmount is the same as the amount registered in the Cash Stock. 
 
+CashStock:
+pk:cashStockid
+cashstocklastsessionid
+cashstockstatusname
+cashstockamount
+
+Cashstocksession:
+pk:cashstoksessionid
+fk:cashstockid
+cashstocklaststagename
+
+Cashunitstock:
+pk:cashunitstockid;
+fk:cashunitid
+fk:cashstocksessionid
+
+cashunit:
+pk:cashunitid
+cashunitvalueamount
+
+
 The list of Cash Unit Stock provided must contain the same Cash Unit registered in the last Cash Stock Session and the stage of the Cash Unit Stock. 
 
 Employee data provided must match with the SAML. 
