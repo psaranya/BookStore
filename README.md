@@ -1,4 +1,4 @@
-# BookStore
+8# BookStore
 # KATA - DISTRIBUTED DEVELOPER - Online Bookstore
 
 ## Overview
@@ -114,3 +114,55 @@ public class ValidationService {
 
 
 Branch (UnitRobiId) of the Cash Stock provided must match with the SAML
+
+
+@Service
+public class ValidationService {
+
+    @Autowired
+    private CashStockRepository cashStockRepository;
+
+    @Autowired
+    private CashUnitRepository cashUnitRepository;
+
+    @Autowired
+    private CashStockSessionRepository cashStockSessionRepository;
+
+    public boolean validateOpenCashStock(CashStocksActivateContextRequest request) {
+        // 1. Validate CashStockId exists
+        CashStock cashStock = cashStockRepository.findById(Integer.parseInt(request.getCashStockId()))
+                .orElseThrow(() -> new IllegalArgumentException("CashStockId does not exist"));
+
+        // 2. Validate CashUnitId list
+        List<CashUnit> cashUnitList = request.getCashUnitStockContextList().stream()
+                .map(src -> cashUnitRepository.findById(Integer.parseInt(src.getCashUnitId()))
+                        .orElseThrow(() -> new IllegalArgumentException("CashUnitId does not exist: " + src.getCashUnitId())))
+                .collect(Collectors.toList());
+
+        // 3. Validate CashStockSession exists
+        CashStockSession cashStockSession = cashStockSessionRepository.findById(
+                Integer.parseInt(cashStock.getCashStockLastSessionId()))
+                .orElseThrow(() -> new IllegalArgumentException("CashStockSession does not exist"));
+
+        // 4. Validate CashStockStatusName is "CLOSE"
+        if (!"CLOSE".equals(cashStock.getCashStockStatusName())) {
+            throw new IllegalArgumentException("CashStockStatusName must be 'CLOSE'");
+        }
+
+        // 5. Compute total cash value from provided CashUnitStocks
+        int totalCashValue = request.getCashUnitStockContextList().stream()
+                .mapToInt(cus -> {
+                    CashUnit cashUnit = cashUnitRepository.findById(Integer.parseInt(cus.getCashUnitId()))
+                            .orElseThrow(() -> new IllegalArgumentException("CashUnitId not found: " + cus.getCashUnitId()));
+                    return cus.getCashUnitStockQuantity() * cashUnit.getCashUnitValueAmount();
+                }).sum();
+
+        // 6. Validate the computed amount with the requested CashStockOperationAmount
+        if (!cashStock.getCashStockAmount().equals(totalCashValue)) {
+            throw new IllegalArgumentException("CashStockOperationAmount does not match the total calculated value");
+        }
+
+        return true;
+    }
+}
+
