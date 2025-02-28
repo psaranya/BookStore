@@ -1,0 +1,41 @@
+@Service
+public class CashStockService {
+
+    @Autowired
+    private CashStockRepository cashStockRepository;
+
+    public List<CashStock> getCashStocks(Long cashStockId, String status, String typeName, String location, String currency, String category) {
+        Specification<CashStock> spec = Specification.where(hasCashStockId(cashStockId)) // Mandatory
+                .and(hasStatus(status))
+                .and(hasTypeName(typeName))
+                .and(hasLocation(location))
+                .and(hasCurrency(currency))
+                .and(hasCategory(category));
+
+        return cashStockRepository.findAll(spec);
+    }
+
+    private Specification<CashStock> hasCashStockId(Long cashStockId) {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("cashStockId"), cashStockId);
+    }
+
+    private Specification<CashStock> hasStatus(String status) {
+        return (status == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), status);
+    }
+
+    private Specification<CashStock> hasTypeName(String typeName) {
+        return (typeName == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("typeName"), typeName);
+    }
+
+    private Specification<CashStock> hasLocation(String location) {
+        return (location == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("location"), location);
+    }
+
+    private Specification<CashStock> hasCurrency(String currency) {
+        return (currency == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("currency"), currency);
+    }
+
+    private Specification<CashStock> hasCategory(String category) {
+        return (category == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("category"), category);
+    }
+}
