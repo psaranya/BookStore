@@ -1,41 +1,17 @@
-@Service
-public class CashStockService {
-
-    @Autowired
-    private CashStockRepository cashStockRepository;
-
-    public List<CashStock> getCashStocks(Long cashStockId, String status, String typeName, String location, String currency, String category) {
-        Specification<CashStock> spec = Specification.where(hasCashStockId(cashStockId)) // Mandatory
-                .and(hasStatus(status))
-                .and(hasTypeName(typeName))
-                .and(hasLocation(location))
-                .and(hasCurrency(currency))
-                .and(hasCategory(category));
-
-        return cashStockRepository.findAll(spec);
-    }
-
-    private Specification<CashStock> hasCashStockId(Long cashStockId) {
-        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("cashStockId"), cashStockId);
-    }
-
-    private Specification<CashStock> hasStatus(String status) {
-        return (status == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), status);
-    }
-
-    private Specification<CashStock> hasTypeName(String typeName) {
-        return (typeName == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("typeName"), typeName);
-    }
-
-    private Specification<CashStock> hasLocation(String location) {
-        return (location == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("location"), location);
-    }
-
-    private Specification<CashStock> hasCurrency(String currency) {
-        return (currency == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("currency"), currency);
-    }
-
-    private Specification<CashStock> hasCategory(String category) {
-        return (category == null) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("category"), category);
-    }
-}
+CREATE TABLE CASH_STOCK (
+  ID BIGINT PRIMARY KEY,
+  "TYPE" VARCHAR(15) NOT NULL,
+  STATUS VARCHAR(15) NOT NULL,
+  LAST_SESSION_ID BIGINT,
+  AMOUNT BIGINT NOT NULL,
+  CURRENCY_CODE CHAR(3) NOT NULL,
+  UNIT_ID VARCHAR(6) NOT NULL,
+  PARENT_CASH_STOCK_ID BIGINT,
+  CREATION_DATETIME TIMESTAMP NOT NULL DEFAULT NOW(),
+  UPDATE_DATETIME TIMESTAMP
+);
+ALTER TABLE CASH_STOCK
+ADD CONSTRAINT FK_CASH_STOCK_PARENT_CASH_STOCK_ID
+FOREIGN KEY (PARENT_CASH_STOCK_ID) REFERENCES CASH_STOCK(ID),
+ADD CONSTRAINT FK_CASH_STOCK_LAST_SESSION_ID
+FOREIGN KEY (LAST_SESSION_ID) REFERENCES CASH_STOCK_SESSION(ID);
