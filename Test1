@@ -57,3 +57,19 @@ public class CashStockService {
         return (category == null || category.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("category"), category);
     }
 }
+
+@Mapper(componentModel = "spring")
+public abstract class CashStockMapper {
+
+    @Autowired
+    private LocationRepository locationRepository;
+
+    @Mapping(target = "locationName", expression = "java(getLocationName(cashStock.getLocationId()))")
+    public abstract CashStockDTO toDto(CashStock cashStock);
+
+    // Custom method to fetch location name
+    protected String getLocationName(Long locationId) {
+        return locationId != null ? locationRepository.findLocationNameById(locationId) : null;
+    }
+}
+
