@@ -1,0 +1,37 @@
+
+@Mapper(componentModel = "spring" , uses = CashStockDeliveryHelper.class)
+public interface CashStockResponseMapper {
+
+    @Mapping(source = "id",target = "cashStockId")
+    @Mapping(source = "type",target = "cashStockTypeName")
+    @Mapping(source = "status",target = "cashStockStatusName")
+    @Mapping(source = "amount",target = "cashStockAmount")
+    @Mapping(source = "currencyCode",target = "cashStockCurrencyCode")
+    @Mapping(source = "cashStockLastSessionId",target = "cashStockLastSessionId", qualifiedByName = "mapSessionToId")
+    @Mapping(source = "unitRobiId",target = "unitRobiId")
+    @Mapping(target = "cashStockTransportDaysCoinsName", expression = "java(helper.getTransportDay(cashStock, \"COINS\"))")
+    @Mapping(target = "cashStockTransportDaysNotesName", expression = "java(helper.getTransportDay(cashStock, \"NOTES\"))")
+    CashStockContext toDto(CashStock cashStock,@Context CashStockDeliveryHelper helper);
+
+    @Named("mapSessionToId")
+    default String mapSessionToId(CashStockSession session){
+        return (session != null) ? String.valueOf(session.getId()) : null;
+    }
+
+
+    List<CashStockContext> toDtoList(List<CashStock> cashUnitStocks);
+
+    default CashStockContextList mapToContextList(List<CashStock> entityList) {
+        CashStockContextList contextList = new CashStockContextList();
+        contextList.addAll(toDtoList(entityList));
+        return contextList;
+    }
+
+    @Mapping(target = "cashStockContextList", source = "cashStockContextList")
+    default CashStockResponse mapResponse(List<CashStock> cashStockContextList){
+        CashStockResponse cashStockResponse = new CashStockResponse();
+        cashStockResponse.setCashStockContextList(mapToContextList(cashStockContextList));
+        return cashStockResponse;
+
+    }
+}
