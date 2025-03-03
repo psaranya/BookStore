@@ -35,3 +35,31 @@ public interface CashStockResponseMapper {
 
     }
 }
+
+import org.mapstruct.Named;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import com.bnppf.adm.kash.repository.CashStockDeliveryRepository;
+
+@Component
+public class CashStockMapperHelper {
+
+    @Autowired
+    private CashStockDeliveryRepository cashStockDeliveryRepository;
+
+    @Named("mapSessionToId")
+    public static String mapSessionToId(CashStockSession session) {
+        return (session != null) ? String.valueOf(session.getId()) : null;
+    }
+
+    @Named("mapTransportDaysCoins")
+    public String mapTransportDaysCoins(Long cashStockId) {
+        return cashStockDeliveryRepository.getTransportDay(cashStockId, "COINS");
+    }
+
+    @Named("mapTransportDaysNotes")
+    public String mapTransportDaysNotes(Long cashStockId) {
+        return cashStockDeliveryRepository.getTransportDay(cashStockId, "NOTES");
+    }
+}
+
