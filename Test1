@@ -72,4 +72,27 @@ public abstract class CashStockMapper {
         return locationId != null ? locationRepository.findLocationNameById(locationId) : null;
     }
 }
+{
+  "cashStockContextList": [
+    {
+      "cashStockId": "1",
+      "cashStockTypeName": "MAIN",
+      "cashStockStatusName": "CLOSE",
+      "cashStockLastSessionId": "1",
+      "cashStockTransportDaysCoinsName": "MONDAY",
+      "cashStockTransportDaysNotesName": "TUESDAY",
+      "cashStockAmount": 100,
+      "cashStockCurrencyCode": "EUR",
+      "unitRobiId": "012939"
+    }
+  ]
+}
 
+CREATE TABLE CASH_STOCK_DELIVERY ( ID BIGINT PRIMARY KEY,CASH_STOCK_ID BIGINT NOT NULL, DELIVERY_TYPE VARCHAR(15) NOT NULL,IS_MONDAY BOOLEAN,
+  IS_TUESDAY BOOLEAN,IS_WEDNESDAY BOOLEAN,IS_THURSDAY BOOLEAN,IS_FRIDAY BOOLEAN,IS_SATURDAY BOOLEAN,IS_SUNDAY BOOLEAN,CONSTRAINT UC_CASH_STOCK_DELIVERY UNIQUE (CASH_STOCK_ID, DELIVERY_TYPE));
+
+ protected CashStockDelivery findByCashStock(Long cashStockId) {
+        return cashStockId != null ? cashStockDeliveryRepo.findByCashStock(cashStockId) : null;
+    }
+@Mapping(target = "cashStockTransportDaysCoinsName", expression = "java(findByCashStock(cashStock.getId))")
+    CashStockContext toDto(CashStock cashStock)
