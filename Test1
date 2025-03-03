@@ -16,3 +16,44 @@ FOREIGN KEY (PARENT_CASH_STOCK_ID) REFERENCES CASH_STOCK(ID),
 ADD CONSTRAINT FK_CASH_STOCK_LAST_SESSION_ID
 FOREIGN KEY (LAST_SESSION_ID) REFERENCES CASH_STOCK_SESSION(ID);
 ALTER TABLE CASH_STOCK RENAME COLUMN "TYPE" TO STOCK_TYPE;
+@Service
+public class CashStockService {
+
+    @Autowired
+    private CashStockRepository cashStockRepository;
+
+    public List<CashStock> getCashStocks(Long cashStockId, String status, String typeName, String location, String currency, String category) {
+        Specification<CashStock> spec = Specification.where(hasCashStockId(cashStockId))
+                .and(Optional.ofNullable(hasStatus(status)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
+                .and(Optional.ofNullable(hasTypeName(typeName)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
+                .and(Optional.ofNullable(hasLocation(location)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
+                .and(Optional.ofNullable(hasCurrency(currency)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
+                .and(Optional.ofNullable(hasCategory(category)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()));
+
+        return cashStockRepository.findAll(spec);
+    }
+
+    private Specification<CashStock> hasCashStockId(Long cashStockId) {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("cashStockId"), cashStockId);
+    }
+
+    private Specification<CashStock> hasStatus(String status) {
+        return (status == null || status.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), status);
+    }
+
+    private Specification<CashStock> hasTypeName(String typeName) {
+        return (typeName == null || typeName.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("typeName"), typeName);
+    }
+
+    private Specification<CashStock> hasLocation(String location) {
+        return (location == null || location.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("location"), location);
+    }
+
+    private Specification<CashStock> hasCurrency(String currency) {
+        return (currency == null || currency.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("currency"), currency);
+    }
+
+    private Specification<CashStock> hasCategory(String category) {
+        return (category == null || category.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("category"), category);
+    }
+}
