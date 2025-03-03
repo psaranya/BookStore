@@ -1,23 +1,19 @@
 @Mapper(componentModel = "spring")
-public abstract class CashStockMapper {
+public interface CashStockMapper {
 
-    @Autowired
-    private CashStockDeliveryRepository cashStockDeliveryRepository;
+    @Mapping(target = "cashStockId", source = "cashStock.id") // Extract ID from CashStock object
+    @Mapping(target = "cashStockTypeName", source = "cashStock.type")
+    @Mapping(target = "cashStockStatusName", source = "cashStock.status")
+    @Mapping(target = "cashStockLastSessionId", source = "cashStock.lastSessionId")
+    @Mapping(target = "cashStockTransportDaysCoinsName", expression = "java(getTransportDay(cashStock, \"COINS\", cashStockDeliveryRepository))")
+    @Mapping(target = "cashStockTransportDaysNotesName", expression = "java(getTransportDay(cashStock, \"NOTES\", cashStockDeliveryRepository))")
+    @Mapping(target = "cashStockAmount", source = "cashStock.amount")
+    @Mapping(target = "cashStockCurrencyCode", source = "cashStock.currencyCode")
+    @Mapping(target = "unitRobiId", source = "cashStock.unitRobiId")
+    CashStockDTO toDto(CashStockDelivery cashStockDelivery);
 
-    @Mapping(target = "cashStockId", source = "id")
-    @Mapping(target = "cashStockTypeName", source = "type")
-    @Mapping(target = "cashStockStatusName", source = "status")
-    @Mapping(target = "cashStockLastSessionId", source = "lastSessionId")
-    @Mapping(target = "cashStockTransportDaysCoinsName", expression = "java(getTransportDay(cashStock.getId(), \"COINS\"))")
-    @Mapping(target = "cashStockTransportDaysNotesName", expression = "java(getTransportDay(cashStock.getId(), \"NOTES\"))")
-    @Mapping(target = "cashStockAmount", source = "amount")
-    @Mapping(target = "cashStockCurrencyCode", source = "currencyCode")
-    @Mapping(target = "unitRobiId", source = "unitRobiId")
-    public abstract CashStockDTO toDto(CashStock cashStock);
-
-    // Fetch transport days from CashStockDelivery
-    protected String getTransportDay(Long cashStockId, String deliveryType) {
-        List<CashStockDelivery> deliveries = cashStockDeliveryRepository.findByCashStockId(cashStockId);
+    default String getTransportDay(CashStock cashStock, String deliveryType, CashStockDeliveryRepository cashStockDeliveryRepository) {
+        List<CashStockDelivery> deliveries = cashStockDeliveryRepository.findByCashStock(cashStock);
         for (CashStockDelivery delivery : deliveries) {
             if (delivery.getDeliveryType().equalsIgnoreCase(deliveryType)) {
                 if (Boolean.TRUE.equals(delivery.getIsMonday())) return "MONDAY";
