@@ -1,0 +1,34 @@
+@Mapper(componentModel = "spring")
+public abstract class CashStockMapper {
+
+    @Autowired
+    private CashStockDeliveryRepository cashStockDeliveryRepository;
+
+    @Mapping(target = "cashStockId", source = "id")
+    @Mapping(target = "cashStockTypeName", source = "type")
+    @Mapping(target = "cashStockStatusName", source = "status")
+    @Mapping(target = "cashStockLastSessionId", source = "lastSessionId")
+    @Mapping(target = "cashStockTransportDaysCoinsName", expression = "java(getTransportDay(cashStock.getId(), \"COINS\"))")
+    @Mapping(target = "cashStockTransportDaysNotesName", expression = "java(getTransportDay(cashStock.getId(), \"NOTES\"))")
+    @Mapping(target = "cashStockAmount", source = "amount")
+    @Mapping(target = "cashStockCurrencyCode", source = "currencyCode")
+    @Mapping(target = "unitRobiId", source = "unitRobiId")
+    public abstract CashStockDTO toDto(CashStock cashStock);
+
+    // Fetch transport days from CashStockDelivery
+    protected String getTransportDay(Long cashStockId, String deliveryType) {
+        List<CashStockDelivery> deliveries = cashStockDeliveryRepository.findByCashStockId(cashStockId);
+        for (CashStockDelivery delivery : deliveries) {
+            if (delivery.getDeliveryType().equalsIgnoreCase(deliveryType)) {
+                if (Boolean.TRUE.equals(delivery.getIsMonday())) return "MONDAY";
+                if (Boolean.TRUE.equals(delivery.getIsTuesday())) return "TUESDAY";
+                if (Boolean.TRUE.equals(delivery.getIsWednesday())) return "WEDNESDAY";
+                if (Boolean.TRUE.equals(delivery.getIsThursday())) return "THURSDAY";
+                if (Boolean.TRUE.equals(delivery.getIsFriday())) return "FRIDAY";
+                if (Boolean.TRUE.equals(delivery.getIsSaturday())) return "SATURDAY";
+                if (Boolean.TRUE.equals(delivery.getIsSunday())) return "SUNDAY";
+            }
+        }
+        return null;
+    }
+}
