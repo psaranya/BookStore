@@ -1,3 +1,56 @@
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class CashUnitGroupService {
+    
+    private final CashUnitGroupRepository cashUnitGroupRepository;
+
+    public CashUnitGroupService(CashUnitGroupRepository cashUnitGroupRepository) {
+        this.cashUnitGroupRepository = cashUnitGroupRepository;
+    }
+
+    public List<CashUnitGroup> getCashUnitGroups(
+            List<Long> cashUnitIdList, 
+            List<String> cashUnitGroupNameList, 
+            List<Integer> cashUnitGroupPhysicalQuantityList) {
+        
+        Specification<CashUnitGroup> spec = Specification.where(null);
+        
+        if (cashUnitIdList != null && !cashUnitIdList.isEmpty()) {
+            spec = spec.and(hasCashUnitIds(cashUnitIdList));
+        }
+        
+        if (cashUnitGroupNameList != null && !cashUnitGroupNameList.isEmpty()) {
+            spec = spec.and(hasGroupNames(cashUnitGroupNameList));
+        }
+        
+        if (cashUnitGroupPhysicalQuantityList != null && !cashUnitGroupPhysicalQuantityList.isEmpty()) {
+            spec = spec.and(hasPhysicalQuantities(cashUnitGroupPhysicalQuantityList));
+        }
+        
+        return cashUnitGroupRepository.findAll(spec);
+    }
+
+    private Specification<CashUnitGroup> hasCashUnitIds(List<Long> cashUnitIdList) {
+        return (root, query, criteriaBuilder) ->
+                root.get("cashUnit").get("id").in(cashUnitIdList);
+    }
+
+    private Specification<CashUnitGroup> hasGroupNames(List<String> cashUnitGroupNameList) {
+        return (root, query, criteriaBuilder) ->
+                root.get("name").in(cashUnitGroupNameList);
+    }
+
+    private Specification<CashUnitGroup> hasPhysicalQuantities(List<Integer> cashUnitGroupPhysicalQuantityList) {
+        return (root, query, criteriaBuilder) ->
+                root.get("quantity").in(cashUnitGroupPhysicalQuantityList);
+    }
+}
+
+
 
 @Mapper(componentModel = "spring" , uses = CashStockDeliveryHelper.class)
 public interface CashStockResponseMapper {
