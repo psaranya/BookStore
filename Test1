@@ -1,98 +1,153 @@
-CREATE TABLE CASH_STOCK (
-  ID BIGINT PRIMARY KEY,
-  "TYPE" VARCHAR(15) NOT NULL,
-  STATUS VARCHAR(15) NOT NULL,
-  LAST_SESSION_ID BIGINT,
-  AMOUNT BIGINT NOT NULL,
-  CURRENCY_CODE CHAR(3) NOT NULL,
-  UNIT_ID VARCHAR(6) NOT NULL,
-  PARENT_CASH_STOCK_ID BIGINT,
-  CREATION_DATETIME TIMESTAMP NOT NULL DEFAULT NOW(),
-  UPDATE_DATETIME TIMESTAMP
-);
-ALTER TABLE CASH_STOCK
-ADD CONSTRAINT FK_CASH_STOCK_PARENT_CASH_STOCK_ID
-FOREIGN KEY (PARENT_CASH_STOCK_ID) REFERENCES CASH_STOCK(ID),
-ADD CONSTRAINT FK_CASH_STOCK_LAST_SESSION_ID
-FOREIGN KEY (LAST_SESSION_ID) REFERENCES CASH_STOCK_SESSION(ID);
-ALTER TABLE CASH_STOCK RENAME COLUMN "TYPE" TO STOCK_TYPE;
+@RestController
+@RequestMapping("/cash-stock-management")
+public class CashStockController {
+
+    @Autowired
+    private CashStockService cashStockService;
+
+    @PostMapping("/openCashStock")
+    public ResponseEntity<?> openCashStock(@RequestBody CashStockOpenRequest request) {
+        try {
+            return ResponseEntity.ok(cashStockService.openCashStock(request));
+        } catch (InvalidDataException | FunctionalValidationException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Unexpected error occurred.");
+        }
+    }
+}
+
 @Service
 public class CashStockService {
 
     @Autowired
     private CashStockRepository cashStockRepository;
 
-    public List<CashStock> getCashStocks(Long cashStockId, String status, String typeName, String location, String currency, String category) {
-        Specification<CashStock> spec = Specification.where(hasCashStockId(cashStockId))
-                .and(Optional.ofNullable(hasStatus(status)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
-                .and(Optional.ofNullable(hasTypeName(typeName)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
-                .and(Optional.ofNullable(hasLocation(location)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
-                .and(Optional.ofNullable(hasCurrency(currency)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()))
-                .and(Optional.ofNullable(hasCategory(category)).orElse((root, query, criteriaBuilder) -> criteriaBuilder.conjunction()));
-
-        return cashStockRepository.findAll(spec);
-    }
-
-    private Specification<CashStock> hasCashStockId(Long cashStockId) {
-        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("cashStockId"), cashStockId);
-    }
-
-    private Specification<CashStock> hasStatus(String status) {
-        return (status == null || status.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), status);
-    }
-
-    private Specification<CashStock> hasTypeName(String typeName) {
-        return (typeName == null || typeName.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("typeName"), typeName);
-    }
-
-    private Specification<CashStock> hasLocation(String location) {
-        return (location == null || location.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("location"), location);
-    }
-
-    private Specification<CashStock> hasCurrency(String currency) {
-        return (currency == null || currency.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("currency"), currency);
-    }
-
-    private Specification<CashStock> hasCategory(String category) {
-        return (category == null || category.isEmpty()) ? null : (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("category"), category);
-    }
-}
-
-@Mapper(componentModel = "spring")
-public abstract class CashStockMapper {
+    @Autowired
+    private CashStockSessionRepository cashStockSessionRepository;
 
     @Autowired
-    private LocationRepository locationRepository;
+    private CashUnitStockRepository cashUnitStockRepository;
 
-    @Mapping(target = "locationName", expression = "java(getLocationName(cashStock.getLocationId()))")
-    public abstract CashStockDTO toDto(CashStock cashStock);
+    @Autowired
+    private EntityServiceClient entityServiceClient; // External Entity Service Integration
 
-    // Custom method to fetch location name
-    protected String getLocationName(Long locationId) {
-        return locationId != null ? locationRepository.findLocationNameById(locationId) : null;
+    @Transactional
+    public CashStockOpenResponse openCashStock(CashStockOpenRequest request) {
+        // Step 2.1: Validate Inputs
+        validateInputData(request);
+
+        // Step 2.2: Check Cash Stock and Cash Stock Session
+        CashStock cashStock = cashStockRepository.findById(request.getCashStockId())
+                .orElseThrow(() -> new InvalidDataException("CashStockId not found"));
+
+        if (!"CLOSE".equals(cashStock.getStatus())) {
+            throw new FunctionalValidationException("CashStock must be in 'CLOSE' status.");
+        }
+
+        // Step 2.3: Check for Existing Open Sessions
+        Optional<CashStockSession> existingSession = cashStockSessionRepository
+                .findByCashStockIdAndStatus(request.getCashStockId(), "OPEN");
+
+        if (existingSession.isPresent()) {
+            throw new FunctionalValidationException("Cash Stock Session with 'OPEN' status already exists.");
+        }
+
+        // Step 2.4: Create Cash Stock Session
+        CashStockSession session = new CashStockSession();
+        session.setCashStockId(request.getCashStockId());
+        session.setSessionType("BRANCH");
+        session.setStatus("OPEN");
+        session.setOpenDatetime(LocalDateTime.now());
+        session.setEmployeeId(request.getEmployeeId());
+        cashStockSessionRepository.save(session);
+
+        // Step 2.5: Update Cash Stock
+        cashStock.setStatus("OPEN");
+        cashStock.setLastSessionId(session.getId());
+        cashStockRepository.save(cashStock);
+
+        // Step 2.6: Create Cash Unit Stocks
+        for (CashUnitStockRequest unitRequest : request.getCashUnitStockList()) {
+            CashUnitStock unitStock = new CashUnitStock();
+            unitStock.setCashStockSessionId(session.getId());
+            unitStock.setCashUnitId(unitRequest.getCashUnitId());
+            unitStock.setQuantity(unitRequest.getQuantity());
+            unitStock.setStage("OPENED");
+            cashUnitStockRepository.save(unitStock);
+        }
+
+        // Step 2.7: Create a Copy in 'WORKING' Stage
+        for (CashUnitStockRequest unitRequest : request.getCashUnitStockList()) {
+            CashUnitStock workingUnitStock = new CashUnitStock();
+            workingUnitStock.setCashStockSessionId(session.getId());
+            workingUnitStock.setCashUnitId(unitRequest.getCashUnitId());
+            workingUnitStock.setQuantity(unitRequest.getQuantity());
+            workingUnitStock.setStage("WORKING");
+            cashUnitStockRepository.save(workingUnitStock);
+        }
+
+        // Step 2.8: Create Cash Stock Operation
+        CashStockOperation operation = new CashStockOperation();
+        operation.setCashStockSessionId(session.getId());
+        operation.setCashStockId(request.getCashStockId());
+        operation.setType("CASH_STOCK_OPEN");
+        operation.setStatus("EXECUTED");
+        operation.setAmount(request.getCashStockOperationAmount());
+        operation.setCurrency("EUR");
+        operation.setCreationDatetime(LocalDateTime.now());
+        cashStockOperationRepository.save(operation);
+
+        // Step 2.9: Return Response
+        return new CashStockOpenResponse(request.getCashStockId(), session.getId(), operation.getId(), "EXECUTED");
+    }
+
+    private void validateInputData(CashStockOpenRequest request) {
+        // Validate CashStockId
+        if (!entityServiceClient.isCashStockIdValid(request.getCashStockId())) {
+            throw new InvalidDataException("Invalid CashStockId.");
+        }
+
+        // Validate Employee data
+        if (!entityServiceClient.isEmployeeValid(request.getEmployeeRobiId())) {
+            throw new InvalidDataException("Employee data mismatch.");
+        }
+
+        // Validate CashUnitStock
+        BigDecimal calculatedAmount = request.getCashUnitStockList().stream()
+                .map(unit -> entityServiceClient.getCashUnitValue(unit.getCashUnitId())
+                        .multiply(BigDecimal.valueOf(unit.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        if (!calculatedAmount.equals(request.getCashStockOperationAmount())) {
+            throw new InvalidDataException("CashStockOperationAmount does not match calculated total.");
+        }
     }
 }
-{
-  "cashStockContextList": [
-    {
-      "cashStockId": "1",
-      "cashStockTypeName": "MAIN",
-      "cashStockStatusName": "CLOSE",
-      "cashStockLastSessionId": "1",
-      "cashStockTransportDaysCoinsName": "MONDAY",
-      "cashStockTransportDaysNotesName": "TUESDAY",
-      "cashStockAmount": 100,
-      "cashStockCurrencyCode": "EUR",
-      "unitRobiId": "012939"
-    }
-  ]
+
+@Repository
+public interface CashStockRepository extends JpaRepository<CashStock, Long> {
+    Optional<CashStock> findByIdAndStatus(Long cashStockId, String status);
 }
 
-CREATE TABLE CASH_STOCK_DELIVERY ( ID BIGINT PRIMARY KEY,CASH_STOCK_ID BIGINT NOT NULL, DELIVERY_TYPE VARCHAR(15) NOT NULL,IS_MONDAY BOOLEAN,
-  IS_TUESDAY BOOLEAN,IS_WEDNESDAY BOOLEAN,IS_THURSDAY BOOLEAN,IS_FRIDAY BOOLEAN,IS_SATURDAY BOOLEAN,IS_SUNDAY BOOLEAN,CONSTRAINT UC_CASH_STOCK_DELIVERY UNIQUE (CASH_STOCK_ID, DELIVERY_TYPE));
+@Repository
+public interface CashStockSessionRepository extends JpaRepository<CashStockSession, Long> {
+    Optional<CashStockSession> findByCashStockIdAndStatus(Long cashStockId, String status);
+}
 
- protected CashStockDelivery findByCashStock(Long cashStockId) {
-        return cashStockId != null ? cashStockDeliveryRepo.findByCashStock(cashStockId) : null;
-    }
-@Mapping(target = "cashStockTransportDaysCoinsName", expression = "java(findByCashStock(cashStock.getId))")
-    CashStockContext toDto(CashStock cashStock)
+@Repository
+public interface CashUnitStockRepository extends JpaRepository<CashUnitStock, Long> {}
+
+@FeignClient(name = "entity-service", url = "http://entity-service/api")
+public interface EntityServiceClient {
+
+    @GetMapping("/cashStock/{cashStockId}/exists")
+    boolean isCashStockIdValid(@PathVariable Long cashStockId);
+
+    @GetMapping("/employee/{employeeRobiId}/exists")
+    boolean isEmployeeValid(@PathVariable String employeeRobiId);
+
+    @GetMapping("/cashUnit/{cashUnitId}/value")
+    BigDecimal getCashUnitValue(@PathVariable Long cashUnitId);
+}
+
