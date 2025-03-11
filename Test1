@@ -1,153 +1,48 @@
-@RestController
-@RequestMapping("/cash-stock-management")
-public class CashStockController {
-
-    @Autowired
-    private CashStockService cashStockService;
-
-    @PostMapping("/openCashStock")
-    public ResponseEntity<?> openCashStock(@RequestBody CashStockOpenRequest request) {
-        try {
-            return ResponseEntity.ok(cashStockService.openCashStock(request));
-        } catch (InvalidDataException | FunctionalValidationException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Unexpected error occurred.");
-        }
-    }
-}
-
 @Service
 public class CashStockService {
 
     @Autowired
-    private CashStockRepository cashStockRepository;
-
-    @Autowired
-    private CashStockSessionRepository cashStockSessionRepository;
-
-    @Autowired
     private CashUnitStockRepository cashUnitStockRepository;
 
-    @Autowired
-    private EntityServiceClient entityServiceClient; // External Entity Service Integration
+    public void validateCashUnitStock(CashStockOpenRequest request) {
+        // Step 1: Fetch provided cashUnitIds from the request
+        Map<Long, Integer> providedCashUnitMap = request.getCashUnitStockContextList().stream()
+            .collect(Collectors.toMap(
+                cashUnit -> Long.valueOf(cashUnit.getCashUnitId().trim()), // Convert to Long
+                CashUnitStockContext::getQuantity,
+                Integer::sum // If duplicates exist, sum their quantities
+            ));
 
-    @Transactional
-    public CashStockOpenResponse openCashStock(CashStockOpenRequest request) {
-        // Step 2.1: Validate Inputs
-        validateInputData(request);
+        // Step 2: Fetch CashUnitStocks from the last CashStockSession directly from DB
+        List<CashUnitStock> lastSessionCashUnitStocks =
+            cashUnitStockRepository.findCashUnitStocksByCashStockId(request.getCashStockId());
 
-        // Step 2.2: Check Cash Stock and Cash Stock Session
-        CashStock cashStock = cashStockRepository.findById(request.getCashStockId())
-                .orElseThrow(() -> new InvalidDataException("CashStockId not found"));
+        // Step 3: Create a map of expected cashUnitIds and their stages
+        Map<Long, String> expectedCashUnitStageMap = lastSessionCashUnitStocks.stream()
+            .collect(Collectors.toMap(CashUnitStock::getCashUnitId, CashUnitStock::getStage));
 
-        if (!"CLOSE".equals(cashStock.getStatus())) {
-            throw new FunctionalValidationException("CashStock must be in 'CLOSE' status.");
+        // Step 4: Validate provided Cash Units match expected Cash Units and their stages
+        for (Long providedCashUnitId : providedCashUnitMap.keySet()) {
+            String expectedStage = expectedCashUnitStageMap.get(providedCashUnitId);
+
+            if (expectedStage == null) {
+                throw new InvalidDataException("Invalid CashUnitId: " + providedCashUnitId);
+            }
+
+            if (!"OPENED".equalsIgnoreCase(expectedStage)) {
+                throw new InvalidDataException(
+                    "CashUnitId " + providedCashUnitId + " is not in the required stage 'OPENED'."
+                );
+            }
         }
 
-        // Step 2.3: Check for Existing Open Sessions
-        Optional<CashStockSession> existingSession = cashStockSessionRepository
-                .findByCashStockIdAndStatus(request.getCashStockId(), "OPEN");
+        // Step 5: Ensure no missing CashUnitStocks
+        List<Long> missingCashUnits = expectedCashUnitStageMap.keySet().stream()
+            .filter(id -> !providedCashUnitMap.containsKey(id))
+            .collect(Collectors.toList());
 
-        if (existingSession.isPresent()) {
-            throw new FunctionalValidationException("Cash Stock Session with 'OPEN' status already exists.");
-        }
-
-        // Step 2.4: Create Cash Stock Session
-        CashStockSession session = new CashStockSession();
-        session.setCashStockId(request.getCashStockId());
-        session.setSessionType("BRANCH");
-        session.setStatus("OPEN");
-        session.setOpenDatetime(LocalDateTime.now());
-        session.setEmployeeId(request.getEmployeeId());
-        cashStockSessionRepository.save(session);
-
-        // Step 2.5: Update Cash Stock
-        cashStock.setStatus("OPEN");
-        cashStock.setLastSessionId(session.getId());
-        cashStockRepository.save(cashStock);
-
-        // Step 2.6: Create Cash Unit Stocks
-        for (CashUnitStockRequest unitRequest : request.getCashUnitStockList()) {
-            CashUnitStock unitStock = new CashUnitStock();
-            unitStock.setCashStockSessionId(session.getId());
-            unitStock.setCashUnitId(unitRequest.getCashUnitId());
-            unitStock.setQuantity(unitRequest.getQuantity());
-            unitStock.setStage("OPENED");
-            cashUnitStockRepository.save(unitStock);
-        }
-
-        // Step 2.7: Create a Copy in 'WORKING' Stage
-        for (CashUnitStockRequest unitRequest : request.getCashUnitStockList()) {
-            CashUnitStock workingUnitStock = new CashUnitStock();
-            workingUnitStock.setCashStockSessionId(session.getId());
-            workingUnitStock.setCashUnitId(unitRequest.getCashUnitId());
-            workingUnitStock.setQuantity(unitRequest.getQuantity());
-            workingUnitStock.setStage("WORKING");
-            cashUnitStockRepository.save(workingUnitStock);
-        }
-
-        // Step 2.8: Create Cash Stock Operation
-        CashStockOperation operation = new CashStockOperation();
-        operation.setCashStockSessionId(session.getId());
-        operation.setCashStockId(request.getCashStockId());
-        operation.setType("CASH_STOCK_OPEN");
-        operation.setStatus("EXECUTED");
-        operation.setAmount(request.getCashStockOperationAmount());
-        operation.setCurrency("EUR");
-        operation.setCreationDatetime(LocalDateTime.now());
-        cashStockOperationRepository.save(operation);
-
-        // Step 2.9: Return Response
-        return new CashStockOpenResponse(request.getCashStockId(), session.getId(), operation.getId(), "EXECUTED");
-    }
-
-    private void validateInputData(CashStockOpenRequest request) {
-        // Validate CashStockId
-        if (!entityServiceClient.isCashStockIdValid(request.getCashStockId())) {
-            throw new InvalidDataException("Invalid CashStockId.");
-        }
-
-        // Validate Employee data
-        if (!entityServiceClient.isEmployeeValid(request.getEmployeeRobiId())) {
-            throw new InvalidDataException("Employee data mismatch.");
-        }
-
-        // Validate CashUnitStock
-        BigDecimal calculatedAmount = request.getCashUnitStockList().stream()
-                .map(unit -> entityServiceClient.getCashUnitValue(unit.getCashUnitId())
-                        .multiply(BigDecimal.valueOf(unit.getQuantity())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        if (!calculatedAmount.equals(request.getCashStockOperationAmount())) {
-            throw new InvalidDataException("CashStockOperationAmount does not match calculated total.");
+        if (!missingCashUnits.isEmpty()) {
+            throw new InvalidDataException("Missing CashUnitIds: " + missingCashUnits);
         }
     }
 }
-
-@Repository
-public interface CashStockRepository extends JpaRepository<CashStock, Long> {
-    Optional<CashStock> findByIdAndStatus(Long cashStockId, String status);
-}
-
-@Repository
-public interface CashStockSessionRepository extends JpaRepository<CashStockSession, Long> {
-    Optional<CashStockSession> findByCashStockIdAndStatus(Long cashStockId, String status);
-}
-
-@Repository
-public interface CashUnitStockRepository extends JpaRepository<CashUnitStock, Long> {}
-
-@FeignClient(name = "entity-service", url = "http://entity-service/api")
-public interface EntityServiceClient {
-
-    @GetMapping("/cashStock/{cashStockId}/exists")
-    boolean isCashStockIdValid(@PathVariable Long cashStockId);
-
-    @GetMapping("/employee/{employeeRobiId}/exists")
-    boolean isEmployeeValid(@PathVariable String employeeRobiId);
-
-    @GetMapping("/cashUnit/{cashUnitId}/value")
-    BigDecimal getCashUnitValue(@PathVariable Long cashUnitId);
-}
-
