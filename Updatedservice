@@ -1,0 +1,181 @@
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+public class CashStockService {
+
+    private final CashStockRepository cashStockRepository;
+    private final CashUnitRepository cashUnitRepository;
+    private final CashStockSessionRepository cashStockSessionRepository;
+    private final CashUnitStockRepository cashUnitStockRepository;
+    private final CashStockOperationRepository cashStockOperationRepository;
+    private final CashStockEntityServiceClient cashStockEntityServiceClient;
+
+    public CashStockService(CashStockRepository cashStockRepository,
+                            CashUnitRepository cashUnitRepository,
+                            CashStockSessionRepository cashStockSessionRepository,
+                            CashUnitStockRepository cashUnitStockRepository,
+                            CashStockOperationRepository cashStockOperationRepository,
+                            CashStockEntityServiceClient cashStockEntityServiceClient) {
+        this.cashStockRepository = cashStockRepository;
+        this.cashUnitRepository = cashUnitRepository;
+        this.cashStockSessionRepository = cashStockSessionRepository;
+        this.cashUnitStockRepository = cashUnitStockRepository;
+        this.cashStockOperationRepository = cashStockOperationRepository;
+        this.cashStockEntityServiceClient = cashStockEntityServiceClient;
+    }
+
+    @Transactional(rollbackFor = CashException.class)
+    public CashStockOperationContextResponse openCashStock(CashStocksActivateContextRequest request) throws CashException {
+        try {
+            log.info("Starting cash stock opening process for CashStockId: {}", request.getCashStockId());
+
+            // Step 1: Validate Inputs
+            validateInputData(request);
+
+            // Step 2: Create Cash Stock Session
+            CashStockSession session = createCashStockSession(request);
+
+            // Step 3: Update Cash Stock Status
+            updateCashStockStatus(session);
+
+            // Step 4: Create Cash Unit Stocks
+            createCashUnitStocks(request, session, "OPENED");
+
+            // Step 5: Create a Copy in 'WORKING' Stage
+            createCashUnitStocks(request, session, "WORKING");
+
+            // Step 6: Create Cash Stock Operation
+            CashStockOperation operation = createCashStockOperation(request, session);
+
+            log.info("Cash stock successfully opened for CashStockId: {}", request.getCashStockId());
+
+            return buildResponse(session, operation);
+        } catch (CashException e) {
+            log.error("Cash stock opening failed for CashStockId: {}. Rolling back transaction.", request.getCashStockId(), e);
+            throw e;
+        } catch (Exception e) {
+            log.error("Unexpected error occurred while opening cash stock for CashStockId: {}. Rolling back transaction.", request.getCashStockId(), e);
+            throw new CashException("KASH_10000099", "Unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR, "System error", "");
+        }
+    }
+
+    private void validateInputData(CashStocksActivateContextRequest request) throws CashException {
+        log.info("Validating input data for CashStockId: {}", request.getCashStockId());
+
+        CashStockResponse cashStockResponse = cashStockEntityServiceClient.getCashStockById(Long.valueOf(request.getCashStockId()))
+                .orElseThrow(() -> new CashException("KASH_10000001", "CashStockId must exist", HttpStatus.BAD_REQUEST, "Functional errors", ""));
+
+        Optional<CashStockContext> cashStockContext = cashStockResponse.getCashStockContextList().stream()
+                .filter(context -> context.getCashStockId().equals(request.getCashStockId()))
+                .findFirst();
+
+        if (!cashStockContext.isPresent() || !"CLOSE".equalsIgnoreCase(cashStockContext.get().getCashStockStatusName())) {
+            throw new CashException("KASH_10000002", "CashStockStatusName must be 'CLOSE'.", HttpStatus.BAD_REQUEST, "Validation error", "");
+        }
+
+        if (!cashStockContext.get().getCashStockAmount().equals(request.getCashStockOperationAmount())) {
+            throw new CashException("KASH_10000005", "CashStockOperationAmount must match the registered amount.", HttpStatus.BAD_REQUEST, "Validation error", "");
+        }
+
+        validateCashUnitStocks(request);
+    }
+
+    private void validateCashUnitStocks(CashStocksActivateContextRequest request) throws CashException {
+        List<Long> cashUnitIds = request.getCashUnitStockContextList().stream()
+                .map(CashUnitStockContext::getCashUnitId)
+                .map(this::convertToLong)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        List<Long> validCashUnitIds = cashUnitRepository.findValidCashUnitIds(cashUnitIds);
+        List<Long> invalidCashUnitIds = cashUnitIds.stream().filter(id -> !validCashUnitIds.contains(id)).collect(Collectors.toList());
+
+        if (!invalidCashUnitIds.isEmpty()) {
+            throw new CashException("KASH_10000003", "Invalid CashUnitIds exist.", HttpStatus.BAD_REQUEST, "Validation error", "");
+        }
+    }
+
+    private CashStockSession createCashStockSession(CashStocksActivateContextRequest request) {
+        CashStockSession session = new CashStockSession();
+        CashStock cashStock = cashStockRepository.findById(Long.valueOf(request.getCashStockId()))
+                .orElseThrow(() -> new RuntimeException("CashStock not found"));
+
+        session.setCashStock(cashStock);
+        session.setType("BRANCH");
+        session.setStatus("OPEN");
+        session.setOpenDatetime(Instant.now());
+
+        Employee employee = new Employee(request.getEmployeeFirstName(), request.getEmployeeRobiId(), request.getEmployeeLastName());
+        session.setEmployee(employee);
+
+        return cashStockSessionRepository.save(session);
+    }
+
+    private void updateCashStockStatus(CashStockSession session) {
+        CashStock cashStock = session.getCashStock();
+        cashStock.setStatus("OPEN");
+        cashStock.setCashStockLastSessionId(session);
+        cashStockRepository.save(cashStock);
+    }
+
+    private void createCashUnitStocks(CashStocksActivateContextRequest request, CashStockSession session, String stageName) {
+        for (CashUnitStockContext unitRequest : request.getCashUnitStockContextList()) {
+            CashUnit cashUnit = cashUnitRepository.findById(Long.valueOf(unitRequest.getCashUnitId()))
+                    .orElseThrow(() -> new RuntimeException("CashUnit not found"));
+
+            CashUnitStock unitStock = new CashUnitStock();
+            unitStock.setCashStockSession(session);
+            unitStock.setCashUnit(cashUnit);
+            unitStock.setQuantity(unitRequest.getCashUnitStockQuantity());
+
+            CashUnitStockStageValue stockStageValue = new CashUnitStockStageValue();
+            stockStageValue.setName(stageName);
+            unitStock.setCashUnitStockStageValue(stockStageValue);
+
+            cashUnitStockRepository.save(unitStock);
+        }
+    }
+
+    private CashStockOperation createCashStockOperation(CashStocksActivateContextRequest request, CashStockSession session) {
+        CashStockOperation operation = new CashStockOperation();
+        operation.setCashStockSession(session);
+        operation.setCashStock(session.getCashStock());
+
+        CashStockOperationTypeValue typeValue = new CashStockOperationTypeValue();
+        typeValue.setName("CASH_STOCK_OPEN");
+        operation.setCashStockOperationTypeValueId(typeValue);
+
+        operation.setStatus("EXECUTED");
+        operation.setAmount(BigInteger.valueOf(request.getCashStockOperationAmount()));
+        operation.setCurrencyCode("EUR");
+        operation.setCreationDatetime(LocalDateTime.now());
+
+        return cashStockOperationRepository.save(operation);
+    }
+
+    private CashStockOperationContextResponse buildResponse(CashStockSession session, CashStockOperation operation) {
+        CashStockOperationContextResponse response = new CashStockOperationContextResponse();
+        response.setCashStockSessionId(String.valueOf(session.getId()));
+        response.setCashStockId(String.valueOf(session.getCashStock().getId()));
+        response.setCashStockOperationId(String.valueOf(operation.getId()));
+        response.setCashStockOperationStatusName(operation.getStatus());
+        return response;
+    }
+
+    private Long convertToLong(String value) {
+        try {
+            return Long.valueOf(value.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+}
