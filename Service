@@ -1,1 +1,145 @@
-
+@Service
+public class CashStockService {
+    public CashStockService(CashStockRepository cashStockRepository, CashUnitRepository cashUnitRepository, CashStockSessionRepository cashStockSessionRepository, CashUnitStockRepository cashUnitStockRepository, CashStockOperationRepository cashStockOperationRepository, CashStockEntityServiceClient cashStockEntityServiceClient) {
+        this.cashStockRepository = cashStockRepository;
+        this.cashUnitRepository = cashUnitRepository;
+        this.cashStockSessionRepository = cashStockSessionRepository;
+        this.cashUnitStockRepository = cashUnitStockRepository;
+        this.cashStockOperationRepository = cashStockOperationRepository;
+        this.cashStockEntityServiceClient = cashStockEntityServiceClient;
+    }
+    @Transactional
+    public CashStockOperationContextResponse openCashStock(CashStocksActivateContextRequest request) throws CashException {
+        // Step 2.1: Validate Inputs
+        validateInputData(request);
+        // Step 2.4: Create Cash Stock Session
+        CashStockSession session = new CashStockSession();
+        Optional<CashStock> cashStock = cashStockRepository.findById(Long.valueOf(request.getCashStockId()));
+        session.setCashStock(cashStock.get());
+        session.setType("BRANCH");
+        session.setStatus("OPEN");
+        session.setOpenDatetime(Instant.from(LocalDateTime.now()));
+        Employee employee = new Employee();
+        employee.setEmployeeFirstName(request.getEmployeeFirstName());
+        employee.setEmployeeRobiId(request.getEmployeeRobiId());
+        employee.setEmployeeLastName(request.getEmployeeLastName());
+        session.setEmployee(employee);
+        cashStockSessionRepository.save(session);
+        // Step 2.5: Update Cash Stock
+        cashStock.get().setStatus("OPEN");
+        cashStock.get().setCashStockLastSessionId(session);
+        cashStockRepository.save(cashStock.get());
+        // Step 2.6: Create Cash Unit Stocks
+        for (CashUnitStockContext unitRequest : request.getCashUnitStockContextList()) {
+            CashUnitStock unitStock = new CashUnitStock();
+            unitStock.setCashStockSession(session);
+            Optional<CashUnit> cashUnit = cashUnitRepository.findById(Long.valueOf(unitRequest.getCashUnitId()));
+            unitStock.setCashUnit(cashUnit.get());
+            unitStock.setQuantity(unitRequest.getCashUnitStockQuantity());
+            CashUnitStockStageValue stockStageValue = new CashUnitStockStageValue();
+            stockStageValue.setName("OPENED");
+            unitStock.setCashUnitStockStageValue(stockStageValue);
+            cashUnitStockRepository.save(unitStock);
+        }
+        // Step 2.7: Create a Copy in 'WORKING' Stage
+        for (CashUnitStockContext unitRequest : request.getCashUnitStockContextList()) {
+            CashUnitStock workingUnitStock = new CashUnitStock();
+            workingUnitStock.setCashStockSession(session);
+            Optional<CashUnit> cashUnit = cashUnitRepository.findById(Long.valueOf(unitRequest.getCashUnitId()));
+            workingUnitStock.setCashUnit(cashUnit.get());
+            workingUnitStock.setQuantity(unitRequest.getCashUnitStockQuantity());
+            CashUnitStockStageValue stockStageValue = new CashUnitStockStageValue();
+            stockStageValue.setName("WORKING");
+            workingUnitStock.setCashUnitStockStageValue(stockStageValue);
+            cashUnitStockRepository.save(workingUnitStock);
+        }
+        // Step 2.8: Create Cash Stock Operation
+        CashStockOperation operation = new CashStockOperation();
+        operation.setCashStockSession(session);
+        operation.setCashStock(cashStock.get());
+        CashStockOperationTypeValue  typeValue = new CashStockOperationTypeValue();
+        typeValue.setName("CASH_STOCK_OPEN");
+        operation.setCashStockOperationTypeValueId(typeValue);
+        operation.setStatus("EXECUTED");
+        operation.setAmount(BigInteger.valueOf(request.getCashStockOperationAmount()));
+        operation.setCurrencyCode("EUR");
+        operation.setCreationDatetime(LocalDateTime.now());
+        cashStockOperationRepository.save(operation);
+        CashStockOperationContextResponse response = new CashStockOperationContextResponse();
+        response.setCashStockSessionId(String.valueOf(session.getId()));
+        response.setCashStockId(String.valueOf(cashStock.get().getId()));
+        response.setCashStockOperationId(String.valueOf(operation.getId()));
+        response.setCashStockOperationStatusName(operation.getStatus());
+        return response;
+    }
+    private void validateInputData(CashStocksActivateContextRequest request) throws CashException {
+        // Validate CashStockId
+        CashStockResponse cashStockResponse = cashStockEntityServiceClient.getCashStockById(Long.valueOf(request.getCashStockId()))
+                .orElseThrow(() -> new CashException("KASH_10000001","CashStockId must exist", HttpStatus.valueOf(String.valueOf(HttpStatus.BAD_REQUEST)),"Functional errors ",""));
+        List<CashStockContext> cashStockContextList = cashStockResponse.getCashStockContextList();
+        Optional<CashStockContext> cashStockContext = cashStockContextList.stream()
+                .filter(context -> context.getCashStockId().equals(request.getCashStockId())).findFirst();
+        if (!"CLOSE".equals(cashStockContext.get().getCashStockStatusName())) {
+            throw new CashException("KASH_10000002","CashStockStatusName of the CashStockId provided must be “CLOSE”.", HttpStatus.valueOf(String.valueOf(HttpStatus.BAD_REQUEST)),"error","");
+        }
+        // CashStockOperationAmount is the same as the amount registered in the Cash Stock.
+        if (!cashStockContext.get().getCashStockAmount().equals(request.getCashStockOperationAmount())){
+            throw new CashException("KASH_10000005","CashStockOperationAmount is the same as the amount registered in the Cash Stock.", HttpStatus.valueOf(String.valueOf(HttpStatus.BAD_REQUEST)),"error","");
+        }
+        // Extract cashUnitIds from request
+        List<Long> cashUnitIds = request.getCashUnitStockContextList().stream()
+                        .map(CashUnitStockContext::getCashUnitId).filter(Objects::nonNull)
+                        .map(this::convertToLong).filter(Objects::nonNull)
+                .collect(Collectors.toList());
+       List<Long> validCashUnitIds =  cashUnitRepository.findValidCashUnitIds(cashUnitIds);
+       List<Long> invalidCashUnitIds = cashUnitIds.stream().filter(id -> !validCashUnitIds.contains(id))
+               .collect(Collectors.toList());
+       if(!invalidCashUnitIds.isEmpty()){
+           throw new CashException("KASH_10000003","CashUnitId in the list of Cash Unit Stock exist.", HttpStatus.valueOf(String.valueOf(HttpStatus.BAD_REQUEST)),"error","");
+       }
+        // Validate CashUnitStock and Compute total cash value from provided CashUnitStocks
+        BigDecimal totalCashValue = request.getCashUnitStockContextList().stream()
+                .map(cus -> {
+                    Optional<CashUnit> cashUnit = cashUnitRepository.findById(Long.parseLong(cus.getCashUnitId()));
+                    return cashUnit.get().getValueAmount().multiply(BigDecimal.valueOf(cus.getCashUnitStockQuantity()));
+                }).reduce(BigDecimal.ZERO,BigDecimal::add);
+        //  Validate the computed amount with the requested CashStockOperationAmount
+        if (!isTotalCashValueEqual(request.getCashStockOperationAmount(), totalCashValue)) {
+            throw new CashException("KASH_10000004","Total amount of the list of Cash Unit Stock is corresponding with the CashStockOperationAmount. Example 2 notes of 50€ must have a CashStockOperationAmount = 100€.", HttpStatus.valueOf(String.valueOf(HttpStatus.BAD_REQUEST)),"error","");
+        }
+        // Step 1: Fetch provided cashUnitIds from the request
+        Map<Long, Integer> providedCashUnitMap = request.getCashUnitStockContextList().stream()
+                .collect(Collectors.toMap(
+                        cashUnit -> Long.valueOf(cashUnit.getCashUnitId().trim()), // Convert to Long
+                        CashUnitStockContext::getCashUnitStockQuantity,
+                        Integer::sum)); // If duplicates exist, sum their quantities
+          // Step 2: Fetch CashUnitStocks from the last CashStockSession directly from DB
+        List<CashUnitStock> lastSessionCashUnitStocks =
+                cashUnitStockRepository.findCashUnitStocksByCashStockId(Long.valueOf(request.getCashStockId()));
+        // Step 3: Create a map of expected cashUnitIds and their stages
+        Map<Long, String> expectedCashUnitStageMap = lastSessionCashUnitStocks.stream()
+                .collect(Collectors.toMap(cashUnitStock -> cashUnitStock.getCashUnit().getId(),
+                       cashUnitStock -> cashUnitStock.getCashUnitStockStageValue().getName()));
+        // Step 4: Validate provided Cash Units match expected Cash Units and their stages
+        for (Long providedCashUnitId : providedCashUnitMap.keySet()) {
+            String expectedStage = expectedCashUnitStageMap.get(providedCashUnitId);
+            if (!"OPENED".equalsIgnoreCase(expectedStage)) {
+                throw new CashException("KASH_10000003","CashUnitId in the list of Cash Unit Stock exist.", HttpStatus.valueOf(String.valueOf(HttpStatus.BAD_REQUEST)),"error","");
+            }   }
+        // Step 5: Ensure no missing CashUnitStocks
+        List<Long> missingCashUnits = expectedCashUnitStageMap.keySet().stream()
+                .filter(id -> !providedCashUnitMap.containsKey(id))
+                .collect(Collectors.toList());
+        if (!missingCashUnits.isEmpty()) {
+            throw new CashException("KASH_10000003","CashUnitId in the list of Cash Unit Stock exist.", HttpStatus.valueOf(String.valueOf(HttpStatus.BAD_REQUEST)),"error","");
+        }  }
+    private Long convertToLong(String value) {
+        try {  return Long.valueOf(value.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }  }
+    private boolean isTotalCashValueEqual(Integer cashStockOperationAmount , BigDecimal totalCashValue) {
+        BigDecimal operationAmount = BigDecimal.valueOf(cashStockOperationAmount);
+        return (totalCashValue.multiply(BigDecimal.valueOf(100))).compareTo(operationAmount) == 0;
+    }
+}
