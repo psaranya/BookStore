@@ -1,0 +1,5 @@
+@Query("SELECT cs FROM CashStock cs " +
+       "JOIN FETCH cs.cashStockLastSessionId session " +
+       "JOIN FETCH session.cashUnitStockStageValue " +
+       "WHERE cs.id = :id")
+Optional<CashStock> findByIdWithSessionAndStageValue(@Param("id") Long id);
