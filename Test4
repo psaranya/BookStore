@@ -3,3 +3,8 @@
        "JOIN FETCH session.cashUnitStockStageValue " +
        "WHERE cs.id = :id")
 Optional<CashStock> findByIdWithSessionAndStageValue(@Param("id") Long id);
+
+ @Query("SELECT c FROM CashUnitStock c WHERE c.cashStockSession.cashStock.id = :cashStockId  AND c.cashUnitStockStageValue.id =: lastStageValue")
+    List<CashUnitStock> findCashUnitStockByLastStage(@Param("cashStockId") Long cashStockId, @Param("lastStageValue") Long lastStageValue);
+
+  List<CashUnitStock> cashUnitStockList = cashUnitStockRepository.findCashUnitStockByLastStage(Long.valueOf(request.getCashStockId()),lastStageValue.getId());
