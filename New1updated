@@ -1,147 +1,23 @@
-@Slf4j
-public abstract class CashStockValidationService {
-    @Autowired
-    protected CashStockRepository cashStockRepository;
-    @Autowired
-    protected CashUnitRepository cashUnitRepository;
-    @Autowired
-    protected CashStockSessionRepository cashStockSessionRepository;
-    @Autowired
-    protected CashUnitStockRepository cashUnitStockRepository;
-    @Autowired
-    protected CashStockEntityServiceClient cashStockEntityServiceClient;
 
-    public void validate(CashStocksActivateContextRequest request) throws CashException {
-        log.info("Validating common logic for CashStockId: {}", request.getCashStockId());
+[Exception flow E2: Functional validation fails] 
+Update Cash Stock with the following parameters: 
+CashStockStatusName from “OPEN” to ”CLOSE” 
+Update Cash Unit Stock in stage "WORKING" to stage “WORKED”. 
+Create Cash Unit Stock in stage "CLOSED" with list of Cash Unit Stock received. 
+Update Cash Stock Session with the following parameters: 
+CashStockSessionStatusName to “CLOSE” 
+CashStockSessionLastStageName to “CLOSED”  
+Create a Cash Stock Operation with the following parameters: 
+CashStockSessionId with the value received in step 1. 
+CashStockId with the value receives in step 1. 
+CashStockOperationTypeName with the value receives in step 1. 
+CashStockOperationComment with the value receives in step 1. 
+CashStockOperationStatusName must be “EXECUTED”. 
+CashStockOperationAmount with the value receives in step 1. 
+CashStockOperationCurrency must be “EUR”. 
+CashStockOperationCreationDatetime must be current datetime. 
+EmployeeRefogId with the value receives in step 1. 
+EmployeeLastName with the value receives in step 1. 
+EmployeeFirstName with the value receives in step 1. 
+Update CashStockAmount of Cash Stock to amount received in CashStockOperationAmount. 
 
-        validateCashStockStatus(request);
-        validateCashStockAmount(request);
-        validateCashUnitStocks(request);
-        validateCashUnitStock(request);
-
-        // Additional validation for specific use cases
-        validateAdditional(request);
-    }
-
-    private void validateCashStockStatus(CashStocksActivateContextRequest request) throws CashException {
-        CashStock cashStock = cashStockRepository.findById(Long.valueOf(request.getCashStockId()))
-                .orElseThrow(() -> new CashException("Error", "CashStock not found", HttpStatus.BAD_REQUEST, "error", ""));
-
-        if (cashStock.getCashStockLastSessionId() == null) {
-            throw new CashException("Error", "Last Session is null.", HttpStatus.BAD_REQUEST, "error", "");
-        }
-
-        if ("OPEN".equalsIgnoreCase(cashStock.getCashStockLastSessionId().getStatus())) {
-            throw new CashException(Constants.FE_02, "CashStockStatusName of the provided CashStockId must be 'OPEN'.", 
-                    HttpStatus.BAD_REQUEST, "error", "");
-        }
-    }
-
-    private void validateCashStockAmount(CashStocksActivateContextRequest request) throws CashException {
-        CashStockResponse cashStockResponse = cashStockEntityServiceClient.getCashStockById(Long.valueOf(request.getCashStockId()))
-                .orElseThrow(() -> new CashException(Constants.FE_01, Constants.FE_01_DESC, HttpStatus.BAD_REQUEST, Constants.FE_ERROR, ""));
-
-        Optional<CashStockContext> cashStockContext = cashStockResponse.getCashStockContextList().stream()
-                .filter(context -> context.getCashStockId().equals(request.getCashStockId()))
-                .findFirst();
-
-        if (cashStockContext.isEmpty() || !Constants.STATUS_CLOSE.equalsIgnoreCase(cashStockContext.get().getCashStockStatusName())) {
-            throw new CashException(Constants.FE_02, Constants.FE_02_DESC, HttpStatus.BAD_REQUEST, Constants.FE_ERROR, "");
-        }
-
-        BigDecimal totalCashValue = request.getCashUnitStockContextList().stream()
-                .map(cus -> {
-                    Optional<CashUnit> cashUnit = cashUnitRepository.findById(Long.parseLong(cus.getCashUnitId()));
-                    return cashUnit.map(value -> value.getValueAmount().multiply(BigDecimal.valueOf(cus.getCashUnitStockQuantity()))).orElse(BigDecimal.ZERO);
-                }).reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        if (!isTotalCashValueEqual(request.getCashStockOperationAmount(), totalCashValue)) {
-            throw new CashException(Constants.FE_04, Constants.FE_04_DESC, HttpStatus.BAD_REQUEST, "error", "");
-        }
-    }
-
-    private void validateCashUnitStocks(CashStocksActivateContextRequest request) throws CashException {
-        List<Long> cashUnitIds = request.getCashUnitStockContextList().stream()
-                .map(CashUnitStockContext::getCashUnitId)
-                .map(this::convertToLong)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-
-        List<Long> validCashUnitIds = cashUnitRepository.findValidCashUnitIds(cashUnitIds);
-        List<Long> invalidCashUnitIds = cashUnitIds.stream().filter(id -> !validCashUnitIds.contains(id)).toList();
-
-        if (!invalidCashUnitIds.isEmpty()) {
-            throw new CashException(Constants.FE_03, Constants.FE_03_DESC, HttpStatus.BAD_REQUEST, Constants.FE_ERROR, "");
-        }
-    }
-
-    private void validateCashUnitStock(CashStocksActivateContextRequest request) throws CashException {
-        log.info("Validating Cash Unit Stocks for CashStockId: {}", request.getCashStockId());
-
-        CashStock cashStock = cashStockRepository.findById(Long.valueOf(request.getCashStockId()))
-                .orElseThrow(() -> new CashException("Error", "Last Session is null.", HttpStatus.BAD_REQUEST, "error", ""));
-
-        CashStockSession cashStockSession = cashStockSessionRepository.findById(cashStock.getCashStockLastSessionId().getId())
-                .orElseThrow(() -> new CashException("Error", "CashStockSession not found.", HttpStatus.BAD_REQUEST, "error", ""));
-
-        CashUnitStockStageValue lastStageValue = cashStockSession.getLastCashUnitStockStageValueId();
-        List<CashUnitStock> cashUnitStockList = cashUnitStockRepository.findCashUnitStockByLastStage(Long.valueOf(request.getCashStockId()), lastStageValue.getId());
-
-        List<Long> cashUnitIds = request.getCashUnitStockContextList().stream()
-                .map(CashUnitStockContext::getCashUnitId)
-                .map(this::convertToLong)
-                .filter(Objects::nonNull)
-                .toList();
-
-        Set<Long> existingCashUnitIds = cashUnitStockList.stream()
-                .map(cashUnitStock -> cashUnitStock.getCashUnit().getId())
-                .collect(Collectors.toSet());
-
-        List<Long> missingCashUnits = cashUnitIds.stream().filter(id -> !existingCashUnitIds.contains(id)).toList();
-
-        if (!missingCashUnits.isEmpty()) {
-            throw new CashException("KASH_10000006", "The provided list of Cash Unit Stocks must match those in the last session.",
-                    HttpStatus.BAD_REQUEST, "Validation error", "");
-        }
-
-        log.info("Validation successful for CashStockId: {}", request.getCashStockId());
-    }
-
-    protected abstract void validateAdditional(CashStocksActivateContextRequest request) throws CashException;
-
-    private boolean isTotalCashValueEqual(Integer cashStockOperationAmount, BigDecimal totalCashValue) {
-        BigDecimal operationAmount = BigDecimal.valueOf(cashStockOperationAmount / 100);
-        return totalCashValue.compareTo(operationAmount) == 0;
-    }
-
-    private Long convertToLong(String value) {
-        try {
-            return Long.valueOf(value.trim());
-        } catch (NumberFormatException ex) {
-            return null;
-        }
-    }
-}
-
-@Service
-public class OpenCashStockValidationService extends CashStockValidationService {
-    @Override
-    protected void validateAdditional(CashStocksActivateContextRequest request) throws CashException {
-        log.info("Additional validation for Opening Cash Stock.");
-        // Add OpenCashStock-specific validation here
-    }
-}
-
-@Autowired
-private CloseCashStockValidationService closeCashStockValidationService;
-
-@Autowired
-private OpenCashStockValidationService openCashStockValidationService;
-
-@Autowired
-private WithdrawalHookingValidationService withdrawalHookingValidationService;
-
-// Call appropriate validator based on use case
-closeCashStockValidationService.validate(request);
-openCashStockValidationService.validate(request);
-withdrawalHookingValidationService.validate(request);
