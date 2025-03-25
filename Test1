@@ -1,48 +1,8 @@
-@Service
-public class CashStockService {
+Mapping data: 
+closeVaultId must be an unique id in 7 digits of the closure for a day and for a branch. Example : 0000001 at the first closure, 0000002 at the second one and the day after the id could be 0000001 again. 
+closeVaultCutList:
+closeVaultTypeOfCut must be CashUnitMoneyTypeName of Cash Unit 
+cashUnitIntegerValueAmount must be the  CashUnitIntegerValueAmount of Cash Unit  
+cashRequestContentQuantity must be the cashUnitStockQuantity registered in Cash Unit Stock 
+cashUnitDecimalValueAmount must be the CashUnitIntegerValueAmount of Cash Unit 
 
-    @Autowired
-    private CashUnitStockRepository cashUnitStockRepository;
-
-    public void validateCashUnitStock(CashStockOpenRequest request) {
-        // Step 1: Fetch provided cashUnitIds from the request
-        Map<Long, Integer> providedCashUnitMap = request.getCashUnitStockContextList().stream()
-            .collect(Collectors.toMap(
-                cashUnit -> Long.valueOf(cashUnit.getCashUnitId().trim()), // Convert to Long
-                CashUnitStockContext::getQuantity,
-                Integer::sum // If duplicates exist, sum their quantities
-            ));
-
-        // Step 2: Fetch CashUnitStocks from the last CashStockSession directly from DB
-        List<CashUnitStock> lastSessionCashUnitStocks =
-            cashUnitStockRepository.findCashUnitStocksByCashStockId(request.getCashStockId());
-
-        // Step 3: Create a map of expected cashUnitIds and their stages
-        Map<Long, String> expectedCashUnitStageMap = lastSessionCashUnitStocks.stream()
-            .collect(Collectors.toMap(CashUnitStock::getCashUnitId, CashUnitStock::getStage));
-
-        // Step 4: Validate provided Cash Units match expected Cash Units and their stages
-        for (Long providedCashUnitId : providedCashUnitMap.keySet()) {
-            String expectedStage = expectedCashUnitStageMap.get(providedCashUnitId);
-
-            if (expectedStage == null) {
-                throw new InvalidDataException("Invalid CashUnitId: " + providedCashUnitId);
-            }
-
-            if (!"OPENED".equalsIgnoreCase(expectedStage)) {
-                throw new InvalidDataException(
-                    "CashUnitId " + providedCashUnitId + " is not in the required stage 'OPENED'."
-                );
-            }
-        }
-
-        // Step 5: Ensure no missing CashUnitStocks
-        List<Long> missingCashUnits = expectedCashUnitStageMap.keySet().stream()
-            .filter(id -> !providedCashUnitMap.containsKey(id))
-            .collect(Collectors.toList());
-
-        if (!missingCashUnits.isEmpty()) {
-            throw new InvalidDataException("Missing CashUnitIds: " + missingCashUnits);
-        }
-    }
-}
