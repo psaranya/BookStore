@@ -6,46 +6,22 @@ cashUnitIntegerValueAmount must be the  CashUnitIntegerValueAmount of Cash Unit
 cashRequestContentQuantity must be the cashUnitStockQuantity registered in Cash Unit Stock 
 cashUnitDecimalValueAmount must be the CashUnitIntegerValueAmount of Cash Unit 
 
+@Mapper(componentModel = "spring")
+public interface CloseVaultRequestMapper {
+    @Mapping(target = "mainFrameRequest.contextInfo", source = "sfIdentityProvider")
+    @Mapping(target = "mainFrameRequest.requestInfo.cashRequestAmount", source = "closeVaultRequest.cashRequestAmount")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultTime", source = "closeVaultRequest.closeVaultTime")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultDate", source = "closeVaultRequest.closeVaultDate")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultId", source = "closeVaultRequest.closeVaultId")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultBuc", source = "closeVaultRequest.closeVaultBuc")
+    @Mapping(target = "mainFrameRequest.requestInfo.cashRequestAmountCurrencyCode", source = "closeVaultRequest.cashRequestAmountCurrencyCode")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultCutList", source = "closeVaultRequest.closeVaultCutList")
+    MFCloseVaultMainRequest mapCloseVaultRequest (CloseVaultRequest closeVaultRequest, SFIdentityProvider sfIdentityProvider);
 
+    List<MFCloseVaultRequestInfoCutListContentInfo> mapToContentInfo(List<CloseVaultCutListContentInfo> contentInfoList);
 
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-
-public class CloseVaultMapper {
-    public static CloseVaultRequest mapToMainframeRequest(List<CashUnitStockContext> cashUnitStockContextList, Map<String, CashUnit> cashUnitMap, String branchId) {
-        CloseVaultRequest request = new CloseVaultRequest();
-        request.setCloseVaultId(generateCloseVaultId(branchId));
-
-        CloseVaultCutList cutList = new CloseVaultCutList();
-        List<CloseVaultCutListContentInfo> cutListContents = cashUnitStockContextList.stream()
-                .map(stock -> {
-                    CashUnit cashUnit = cashUnitMap.get(stock.getCashUnitId()); // Fetch from DB Map
-                    if (cashUnit != null) {
-                        return createCutListContentInfo(stock, cashUnit);
-                    }
-                    return null;
-                })
-                .filter(content -> content != null)
-                .collect(Collectors.toList());
-
-        cutList.setCloseVaultCutListContentInfo(cutListContents);
-        request.setCloseVaultCutList(cutList);
-        
-        return request;
+    default MFCloseVaultRequestInfoCutList mapToContextList(CloseVaultCutList entityList) {
+        MFCloseVaultRequestInfoCutList contextList = new MFCloseVaultRequestInfoCutList();
+        contextList.setCloseVaultContentInfo(mapToContentInfo(entityList.getCloseVaultContentInfo()));
+        return contextList;
     }
-
-    private static CloseVaultCutListContentInfo createCutListContentInfo(CashUnitStockContext stock, CashUnit cashUnit) {
-        CloseVaultCutListContentInfo contentInfo = new CloseVaultCutListContentInfo();
-        contentInfo.setCloseVaultTypeOfCut(cashUnit.getCashUnitMoneyTypeName());
-        contentInfo.setCashUnitIntegerValueAmount(cashUnit.getCashUnitIntegerValueAmount());
-        contentInfo.setCashUnitDecimalValueAmount(cashUnit.getCashUnitIntegerValueAmount());
-        contentInfo.setCashRequestContentQuantity(stock.getQuantity());
-        return contentInfo;
-    }
-
-    private static synchronized String generateCloseVaultId(String branchId) {
-        return String.format("%07d", (int) (Math.random() * 10000000)); // Generate Unique 7-digit ID
-    }
-}
-
