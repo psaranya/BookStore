@@ -25,3 +25,33 @@ public interface CloseVaultRequestMapper {
         contextList.setCloseVaultContentInfo(mapToContentInfo(entityList.getCloseVaultContentInfo()));
         return contextList;
     }
+
+
+
+@Mapper(componentModel = "spring")
+public interface CloseVaultRequestMapper {
+
+    @Mapping(target = "mainFrameRequest.contextInfo", source = "sfIdentityProvider")
+    @Mapping(target = "mainFrameRequest.requestInfo.cashRequestAmount", source = "closeVaultRequest.cashRequestAmount")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultTime", source = "closeVaultRequest.closeVaultTime")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultDate", source = "closeVaultRequest.closeVaultDate")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultId", source = "closeVaultRequest.closeVaultId")
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultBuc", source = "closeVaultRequest.closeVaultBuc")
+    @Mapping(target = "mainFrameRequest.requestInfo.cashRequestAmountCurrencyCode", source = "closeVaultRequest.cashRequestAmountCurrencyCode")
+    
+    // Using a custom mapping method for closeVaultCutList
+    @Mapping(target = "mainFrameRequest.requestInfo.closeVaultCutList", source = "closeVaultRequest.closeVaultCutList", qualifiedByName = "mapToContextList")
+    MFCloseVaultMainRequest mapCloseVaultRequest(CloseVaultRequest closeVaultRequest, SFIdentityProvider sfIdentityProvider);
+
+    List<MFCloseVaultRequestInfoCutListContentInfo> mapToContentInfo(List<CloseVaultCutListContentInfo> contentInfoList);
+
+    @Named("mapToContextList")
+    default MFCloseVaultRequestInfoCutList mapToContextList(CloseVaultCutList entityList) {
+        if (entityList == null) {
+            return null;
+        }
+        MFCloseVaultRequestInfoCutList contextList = new MFCloseVaultRequestInfoCutList();
+        contextList.setCloseVaultContentInfo(mapToContentInfo(entityList.getCloseVaultContentInfo()));
+        return contextList;
+    }
+}
